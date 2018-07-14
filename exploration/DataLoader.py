@@ -9,17 +9,17 @@ class DataLoader:
         self.filenames = []
         pass
 
-    def load_all_csv(self):
+    def load_all_csv(self, encoding='utf-8'):
         dfs = {}
         for f in self.files:
-            dfs[f] = pd.read_csv(self.files[f])
+            dfs[f] = pd.read_csv(self.files[f], encoding=encoding)
         return dfs
 
-    def load_csv(self, fn):
+    def load_csv(self, fn, encoding='utf-8'):
         assert fn in self.filenames, "get file name first"
-        return pd.read_csv(self.files[fn])
+        return pd.read_csv(self.files[fn], encoding=encoding)
 
-    def get_file_name(self, path=None, filters=None, ignore=None):
+    def get_file_name(self, path=None, filters=['.csv'], ignore=[]):
 
         # path: root to search
         # filters: which type of file will be remained
@@ -32,13 +32,9 @@ class DataLoader:
         for root, dirs, files in os.walk(self.root):
             for f in files:
                 fn, fe = os.path.splitext(f)
-                if fe in filters and f not in ignore:
-
-                    if dirs == []:
-                        p = os.path.join(root, f)
-                    else:
-                        p = os.path.join(root, dirs)
-                        p = os.path.join(p, f)
+                if fe != '' and fe in filters and f not in ignore:
+                    p = os.path.join(root, f)
+                        
                     self.files[f] = p
                     self.filenames.append(f)
 
