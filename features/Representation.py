@@ -1,4 +1,6 @@
 import pandas as pd
+import os
+from six.moves import xrange
 
 
 class Representation:
@@ -8,10 +10,16 @@ class Representation:
         target: columns which to predict
         """
         self.keys = keys
+        assert type(target) != list, 'only one target column can be set'
         self.target = target
         self.tables = []
         self.columns = {}
         self.table_nodes = {}
+        pass
+
+    def _check_data_type(self):
+        # check the type of database
+        # TODO
         pass
 
     def _check_keys(self, columns):
@@ -41,7 +49,7 @@ class Representation:
 
     def _find_parent(self, t1):
         for node in self.table_nodes:
-            t2 = node.name
+            t2 = self.table_nodes[node].name
             keys = self._find_common_keys(t1, t2)
             if len(keys) > 0:
                 return True, keys, t2
@@ -51,11 +59,14 @@ class Representation:
     def create_table_tree(self):
         # create root
         self.table_nodes['root'] = table_node('root', [])
-        cnt = 0
+        self.columns['root'] = []
         t_tables = self.tables
-        while cnt != len(self.tables):
+        for i in xrange(100):
             li = []
             for t in t_tables:
+                has_keys = False
+                has_target = False
+
                 if self._check_keys(self.columns[t]):
                     has_keys = True
 
@@ -75,16 +86,47 @@ class Representation:
                             t, self.columns[t], self.table_nodes[parent],
                             keys)
                     li.append(t)
-                    continue
 
             for t in li:
                 t_tables.remove(t)
+
+        assert len(t_tables) == 0, 'creation fails, there are still %d tables, that are in node transformitted' % len(t_tables)
+
+    # TODO def generate_data(self):
+    def load_column(self, path):
+        fn = os.path.basename(path)
+        self.tables.append(fn)
+        self.columns[fn] = pd.read_csv(path, nrows=1).columns.tolist()
 
     def load_columns(self, paths):
         # paths: dict of paths
         for f in paths:
             self.tables.append(f)
             self.columns[f] = pd.read_csv(paths[f], nrows=1).columns.tolist()
+
+    def show_columns(self):
+        for col in self.columns:
+            print('table: '+col)
+            print(self.columns[col])
+            print('\n')
+
+    def show_table_tree(self):
+        print('table tree:')
+        print('\n')
+        for name in self.table_nodes:
+            node = self.table_nodes[name]
+            print('children of '+name)
+            for child in node.children:
+                print(child.name)
+            if name != 'root':
+                print('parent of '+name+':'+node.parent.name)
+                print('keys: '+''.join(node.keys))
+            print('\n')
+
+    def show_tables(self):
+        print('tables:')
+        print(self.tables)
+        print('\n')
 
 
 class table_node:
@@ -120,6 +162,11 @@ class table_node:
             if col in parent.columns:
                 keys.append(col)
 
-        assert len(keys) != 0, "this table node has a wrong parent"
+        if parent.name != 'root':
+            assert len(keys) != 0, "this table node has a wrong parent"
         return keys
 
+
+class inbalance_data:
+    def __init__(self):
+        pass

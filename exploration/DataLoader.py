@@ -40,6 +40,13 @@ class DataLoader:
 
         return self.filenames
 
+    def ignore(self, ig):
+        for i in ig:
+            del self.files[i]
+            self.filenames.remove(i)
+
+        return self.ret_file_names()
+
     def ret_file_names(self):
         assert len(self.filenames) != 0, "get file name first"
         return self.filenames
