@@ -19,6 +19,19 @@ class DataLoader:
         assert fn in self.filenames, "get file name first"
         return pd.read_csv(self.files[fn], encoding=encoding)
 
+    def load_table_with_cols(self, table, cols=None, encoding='utf-8'):
+        # cols: which columns should be loaded
+        if cols is None:
+            df = self.load_csv(table, encoding=encoding)
+        else:
+            df = pd.read_csv(self.files[table], usecols=cols, encoding=encoding)
+
+        return df
+
+    def get_file_by_name(self, fn):
+        assert fn in self.files.keys(), 'no this file in loader'
+        return self.files[fn]
+
     def get_file_name(self, path=None, filters=['.csv'], ignore=[]):
 
         # path: root to search
