@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import numpy as np
 from six.moves import xrange
 
 
@@ -12,10 +13,10 @@ class Representation:
         self.keys = keys
         assert type(target) != list, 'only one target column can be set'
         self.target = target
-        self.tables = []
         self.columns = {}
         self.table_nodes = {}
         self.loader = loader
+        self.tables = []
         pass
 
     def check_data_type(self):
@@ -32,13 +33,16 @@ class Representation:
                 if len(df[df[self.target] == c])/df_len > 0.8:
                     self.is_balanced = False
                     clazz.remove(c)
+                    # minority is list
                     self.minority = clazz
+                    # majority is value
+                    self.majority = c
 
         else:
             self.problem = 'regression'
             # TODO
 
-        return self.problem, self.is_balanced, self.minority
+        return self.problem, self.is_balanced, self.minority, self.majority
 
     def _check_keys(self, columns):
         cnt = 0
@@ -93,7 +97,7 @@ class Representation:
         # create root
         self.table_nodes['root'] = table_node('root', [])
         self.columns['root'] = []
-        t_tables = self.tables
+        t_tables = self.tables.copy()
         for i in xrange(100):
             li = []
             for t in t_tables:
@@ -125,6 +129,76 @@ class Representation:
 
         assert len(t_tables) == 0, 'creation fails, there are still %d tables, that are in node transformitted' % len(t_tables)
         assert self._check_main_tables(), 'main tables have different columns'
+    def get_all_cols(self):
+        cols = []
+        for t in self.columns:
+            cols.extend(self.columns[t])
+
+        cols = list(set(cols))
+        return cols
+
+    def get_all_cols_by_tables(self, tables):
+        cols = []
+        for table in tables:
+            cols.extend(self.columns[table])
+
+        cols = list(set(cols))
+        return cols
+
+    def get_cols_in_main_table(self):
+        node = self.table_nodes['root'].children[0]
+        return self.columns[node.name]
+
+    def get_main_tables(self):
+        ret = []
+        for node in self.table_nodes['root'].children:
+            ret.append(node.name)
+
+        return ret
+
+    def get_tables_by_cols(self, cols):
+        ret = []
+        for col in cols:
+            for table in self.tables:
+                if col in self.columns[table]:
+                    ret.append(table)
+        return list(set(ret))
+
+    def get_tree_end(self, tables=None):
+        # get the end of the given tree structure, maybe not leaf of the whole tree
+        if tables is None:
+            tree = list(self.table_nodes.values())
+        else:
+            tree = []
+            tables = list(set(tables))
+            for table in tables:
+                assert table in self.table_nodes.keys(), 'unexpected table: '+table
+                tree.append(self.table_nodes[table])
+
+        # end is list of table name
+        end = []
+        not_end = []
+        t_tree = tree.copy()
+        for node in tree:
+            t_tree.remove(node)
+            for t_node in t_tree:
+                if node.is_ancestor(t_node):
+                    not_end.append(node.name)
+            t_tree.append(node)
+
+        not_end = list(set(not_end))
+
+        for node in tree:
+            if node.name not in not_end:
+                end.append(node.name)
+
+        return end
+
+    def is_main_table(self, table):
+        if self.table_nodes[table].parent.name == 'root':
+            return True
+        else:
+            return False
 
     def load_main_tables(self, cols):
         assert len(self.table_nodes) != 0, 'generate table tree first'
@@ -138,7 +212,9 @@ class Representation:
         df = df.drop_duplicates()
         return df
         
-    # TODO def generate_data(self):
+    def generate_for_inbalanced_data(self):
+        pass
+
     def load_column(self, path):
         fn = os.path.basename(path)
         self.tables.append(fn)
@@ -150,11 +226,15 @@ class Representation:
             self.tables.append(f)
             self.columns[f] = pd.read_csv(paths[f], nrows=1).columns.tolist()
 
-    def get_cols_in_main_table(self):
-        node = self.table_nodes['root'].children[0]
-        return self.columns[node.name]
+    def load_table_with_cols(self, table, cols):
+        cols = list(set(cols))
+        t_cols = []
+        for col in cols:
+            if col in self.columns[table]:
+                t_cols.append(col)
+        return self.loader.load_table_with_cols(table, t_cols)
 
-    def resample(self, tables=None, cols=None, problem=None, is_balanced=None, minority=None):
+    def resample(self, tables=None, cols=None, problem=None, is_balanced=None, minority=None, majority=None, with_foreign_keys=False):
         """
         tables: which tables that want to be resampled, None means all talbes will be resampled
         cols:   which cols should be resample, needn't to know in which table, None means all columns will be resampled
@@ -168,27 +248,107 @@ class Representation:
             is_balanced = self.is_balanced
         if minority is None:
             minority = self.minority
+        if majority is None:
+            majority = self.majority
+
+        if cols is None and tables is None:
+            tables = self.tables.copy()
+            cols = self.get_all_cols()
+        elif cols is None:
+            cols = self.get_all_cols_by_tables(tables)
+        elif tables is None:
+            tables = self.get_tables_by_cols(cols)
+        else:
+            cols.extend(self.get_all_cols_by_tables(tables))
+            tables.extend(self.get_tables_by_cols(cols))
+
+        cols = list(set(cols))
+        tables = list(set(tables))
+        tables = self.get_tree_end(tables)
+        print(tables)
 
         # check whether the columns in main table exist
-        # TODO
+        # keys and target will be always resampled
         t_cols = self.get_cols_in_main_table()
+        main_cols = self.keys+[self.target]
+        for col in cols:
+            if col in t_cols:
+                main_cols.append(col)
+        # keys and target can appear twice, so unique them
+        main_cols = list(set(main_cols))
 
         # load main table with these columns
-        if cols is None:
-            df = self.load_main_tables(t_cols)
-        else:
-            pass
+        df = self.load_main_tables(main_cols)
 
-        # resampled in these tables
-
-        # join the other columns in the other tables in it
-
+        # resampled in these tables, it amouts to a base for join operation
         if problem == 'classification':
             if is_balanced:
                 pass
             else:
+                # minority will be all resample from main table
+                resampled_minority = pd.DataFrame()
+                for value in minority:
+                    curr_df = df[df[self.target]==value]
+                    resampled_minority = pd.concat([resampled_minority, curr_df])
+
+                minority_len = len(resampled_minority)
+                resampled_majority = df[df[self.target]==majority].sample(frac=1)[0:minority_len]
                 pass
-             
+
+        # join the other columns in the other tables in it
+        # TODO Bugs
+        loaded_tables = []
+        for table in tables:
+            assert table in self.table_nodes.keys(), 'unexpected table: '+table
+            # sometimes during loading child table, the parent table will be also loaded, shouldn't load it twice
+            if table in loaded_tables:
+                continue
+
+            # load table
+            t_cols = []
+            t_tn = self.table_nodes[table]
+
+            # main table has be loaded
+            if t_tn.is_main_table():
+                continue
+
+            t_cols = cols + t_tn.keys
+            curr_df = self.loader.load_table_with_cols(table, t_cols)
+
+            # maybe this table has no direct foreign key with main table
+            # so at first search ancester of this table util main table
+            while not t_tn.parent.is_main_table():
+                parent = t_tn.parent
+                parent_cols = t_tn.keys+parent.keys+cols
+                parent_df = self.load_table_with_cols(parent.name, parent_cols)
+                curr_df = pd.merge(parent_df, curr_df, how='left', on=t_tn.keys)
+                t_tn = parent
+                loaded_tables.append(table)
+
+            curr_df = curr_df.drop_duplicates()
+
+            # merge
+            # reduce duplicte columns
+            cols1 = resampled_minority.columns
+            if with_foreign_keys:
+                cols2 = curr_df.columns
+            else:
+                cols2 = cols + self.keys
+            cols2 = list(set(cols2))
+            for col in cols1:
+                if col in cols2:
+                    cols2.remove(col)
+            cols2.extend(self.keys)
+            
+            resampled_minority = pd.merge(resampled_minority, curr_df[cols2], how='left', on=self.keys)
+
+            resampled_majority = pd.merge(resampled_majority, curr_df[cols2], how='left', on=self.keys)
+
+            resampled_minority = resampled_minority.drop_duplicates()
+            resampled_majority = resampled_majority.drop_duplicates()
+
+        return resampled_minority, resampled_majority
+
     def show_columns(self):
         for col in self.columns:
             print('table: '+col)
@@ -216,6 +376,26 @@ class Representation:
         print(self.tables)
         print('\n')
 
+    def type_transformation(self, df, fillan=None, threshold=10):
+        cols = df.columns
+        for col in cols:
+            if df[col].dtype == np.object:
+                li = df[col].tolist()
+                li = list(set(li))
+                
+                if len(li) > threshold:
+                    try:
+                        df[col] = df[col].astype('float')
+                    except ValueError:
+                        df[col] = df[col].fillna('nan').astype('category')
+                else:
+                    df[col] = df[col].fillna('nan').astype('category')
+                    t_df = pd.get_dummies(df[col])
+                    df = pd.concat([df, t_df],axis=1)
+                    df = df.drop(columns=[col])
+
+        return df.dropna()
+
 
 class table_node:
 
@@ -224,7 +404,7 @@ class table_node:
         # each node has only one of parent 
         self.parent = parent
         self.children = []
-        self.columns = cols 
+        self.columns = cols
         if parent is not None:
             parent.add_child(self)
 
@@ -239,6 +419,28 @@ class table_node:
     def del_col(self, col):
         assert col in self.columns, "the deleted column is not in it"
         self.columns.remove(col)
+
+    def is_ancestor(self, node):
+        if node.name == 'root':
+            return False
+        if self.name == 'root':
+            return True
+        ret = False
+        t_tn = node
+        while t_tn.parent.name != 'root':
+            if self.name == t_tn.parent.name:
+                return True
+            t_tn = t_tn.parent
+
+        return ret
+
+    def is_main_table(self):
+        if self.parent is None:
+            return False
+        if self.parent.name == 'root':
+            return True
+        else:
+            return False
 
     def set_cols(self, columns):
         self.colunms = columns
